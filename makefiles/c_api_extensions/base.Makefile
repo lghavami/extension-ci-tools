@@ -6,7 +6,8 @@
 # 	USE_UNSTABLE_C_API     : if set to 1, will allow usage of the unstable C API. (This pins the produced binaries to the exact DuckDB version)
 #   EXTENSION_VERSION      : the version of the extension, if left blank it will be autodetected
 #   DUCKDB_PLATFORM        : the platform of the extension, if left blank it will be autodetected
-#   DUCKDB_TEST_VERSION    : the version of DuckDB to test with, if left blank will default to latest stable on PyPi
+#   DUCKDB_TEST_VERSION    : the version of DuckDB to test with, if left blank will default to DUCKDB_VERSION if that is a
+#                            release (e.g. v1.5.6), otherwise to latest stable on PyPi
 #   LINUX_CI_IN_DOCKER     : indicates that the build is being run in/out of Docker in the linux CI
 #   SKIP_TESTS             : makes the test targets turn into NOPs
 
@@ -108,6 +109,16 @@ TEST_RUNNER_BASE=$(TEST_RUNNER) --test-dir test/sql $(EXTRA_EXTENSIONS_PARAM)
 TEST_RUNNER_DEBUG=$(TEST_RUNNER_BASE) --external-extension build/debug/$(EXTENSION_NAME).duckdb_extension
 TEST_RUNNER_RELEASE=$(TEST_RUNNER_BASE) --external-extension build/release/$(EXTENSION_NAME).duckdb_extension
 
+# Test that an extension's TARGET_DUCKDB_VERSION == DUCKDB_VERSION by attempting to load the extension
+LOAD_TEST=$(PYTHON_VENV_BIN) -c "import duckdb, sys; duckdb.connect(config={'allow_unsigned_extensions': 'true'}).load_extension(sys.argv[1])"
+LOAD_TEST_DEBUG=$(LOAD_TEST) build/debug/$(EXTENSION_NAME).duckdb_extension
+LOAD_TEST_RELEASE=$(LOAD_TEST) build/release/$(EXTENSION_NAME).duckdb_extension
+
+# In CI, test with the DuckDB version that is being built for (DUCKDB_VERSION), if it is a release available on PyPI
+ifeq ($(DUCKDB_TEST_VERSION),)
+	DUCKDB_TEST_VERSION=$(patsubst v%,%,$(shell echo "$(DUCKDB_VERSION)" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$'))
+endif
+
 # By default latest duckdb is installed, set DUCKDB_TEST_VERSION to switch to a different version
 DUCKDB_PIP_INSTALL?=duckdb
 ifeq ($(DUCKDB_TEST_VERSION),main)
@@ -162,10 +173,14 @@ test_extension_release: $(TEST_RELEASE_TARGET)
 test_extension_debug: $(TEST_DEBUG_TARGET)
 
 test_extension_release_internal: check_configure
+	@echo "Loading RELEASE extension.."
+	@$(LOAD_TEST_RELEASE)
 	@echo "Running RELEASE tests.."
 	@$(TEST_RUNNER_RELEASE)
 
 test_extension_debug_internal: check_configure
+	@echo "Loading DEBUG extension.."
+	@$(LOAD_TEST_DEBUG)
 	@echo "Running DEBUG tests.."
 	@$(TEST_RUNNER_DEBUG)
 
